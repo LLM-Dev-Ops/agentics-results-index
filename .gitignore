@@ -30,3 +30,9 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Claude Flow configuration (local development)
+.claude-flow/
+.claude/
+.mcp.json
+CLAUDE.md
