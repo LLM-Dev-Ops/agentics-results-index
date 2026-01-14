@@ -16,6 +16,8 @@ export interface Config {
     user: string;
     password: string;
     ssl: boolean;
+    // Cloud SQL Unix socket path (optional, for Cloud Run)
+    socketPath: string | null;
     // Connection pool settings
     poolMin: number;
     poolMax: number;
@@ -69,12 +71,14 @@ export function loadConfig(): Config {
     host: optionalEnv('HOST', '0.0.0.0'),
 
     database: {
-      host: requireEnv('RUVECTOR_DB_HOST'),
-      port: parseIntEnv('RUVECTOR_DB_PORT', 5432),
-      database: requireEnv('RUVECTOR_DB_NAME'),
-      user: requireEnv('RUVECTOR_DB_USER'),
-      password: requireEnv('RUVECTOR_DB_PASSWORD'),
-      ssl: parseBoolEnv('RUVECTOR_DB_SSL', true),
+      host: process.env['RESULTS_DB_HOST'] ?? process.env['RUVECTOR_DB_HOST'] ?? 'localhost',
+      port: parseIntEnv('RESULTS_DB_PORT', parseIntEnv('RUVECTOR_DB_PORT', 5432)),
+      database: process.env['RESULTS_DB_NAME'] ?? process.env['RUVECTOR_DB_NAME'] ?? 'results-index',
+      user: process.env['RESULTS_DB_USER'] ?? process.env['RUVECTOR_DB_USER'] ?? 'postgres',
+      password: process.env['RESULTS_DB_PASSWORD'] ?? process.env['RUVECTOR_DB_PASSWORD'] ?? '',
+      ssl: parseBoolEnv('RESULTS_DB_SSL', parseBoolEnv('RUVECTOR_DB_SSL', false)),
+      // Cloud SQL socket path: /cloudsql/PROJECT:REGION:INSTANCE
+      socketPath: process.env['CLOUDSQL_SOCKET_PATH'] ?? process.env['INSTANCE_UNIX_SOCKET'] ?? null,
       poolMin: parseIntEnv('DB_POOL_MIN', 2),
       poolMax: parseIntEnv('DB_POOL_MAX', 10),
       statementTimeoutMs: parseIntEnv('DB_STATEMENT_TIMEOUT_MS', 30000),

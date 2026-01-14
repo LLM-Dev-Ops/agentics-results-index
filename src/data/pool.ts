@@ -22,20 +22,38 @@ export function initPool(): Pool {
 
   const config = getConfig();
 
-  const poolConfig: PoolConfig = {
-    host: config.database.host,
-    port: config.database.port,
-    database: config.database.database,
-    user: config.database.user,
-    password: config.database.password,
-    ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
-    min: config.database.poolMin,
-    max: config.database.poolMax,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-    // Read-only enforcement at connection level
-    options: '-c default_transaction_read_only=on',
-  };
+  // Build connection config - use Unix socket if available (Cloud SQL)
+  const poolConfig: PoolConfig = config.database.socketPath
+    ? {
+        // Cloud SQL Unix socket connection
+        host: config.database.socketPath,
+        database: config.database.database,
+        user: config.database.user,
+        password: config.database.password,
+        min: config.database.poolMin,
+        max: config.database.poolMax,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+        // Read-only enforcement at connection level
+        options: '-c default_transaction_read_only=on',
+      }
+    : {
+        // TCP/IP connection
+        host: config.database.host,
+        port: config.database.port,
+        database: config.database.database,
+        user: config.database.user,
+        password: config.database.password,
+        ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
+        min: config.database.poolMin,
+        max: config.database.poolMax,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+        // Read-only enforcement at connection level
+        options: '-c default_transaction_read_only=on',
+      };
+
+  console.log(`[pool] Connecting to database: ${config.database.database} via ${config.database.socketPath || config.database.host}:${config.database.port}`);
 
   pool = new Pool(poolConfig);
 
@@ -123,7 +141,9 @@ export async function checkDatabaseHealth(): Promise<boolean> {
   try {
     const result = await executeReadOnlyQuery('SELECT 1 as health_check');
     return result.rows.length === 1;
-  } catch {
+  } catch (err) {
+    const error = err as Error;
+    console.error('[pool] Health check failed:', error.message);
     return false;
   }
 }
