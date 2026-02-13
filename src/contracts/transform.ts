@@ -80,48 +80,71 @@ function checkMandatoryLayersComplete(layersExecuted: string[]): boolean {
 }
 
 /**
+ * Safely extract metadata, defaulting to empty object when null/undefined.
+ */
+function safeMetadata(run: Run): Record<string, unknown> {
+  return run.metadata ?? {};
+}
+
+/**
  * Transform a Run (legacy or new) into the canonical SimulationExecutionResult.
  *
  * If the run already contains canonical metadata, extract it.
  * Otherwise, synthesize a valid contract shape from available data.
+ *
+ * CRITICAL: This function MUST be null-safe. Legacy rows may have
+ * metadata = null, missing execution_id, or missing simulation_id.
  */
 export function transformToCanonicalResult(run: Run): {
   result: SimulationExecutionResult;
   isLegacy: boolean;
 } {
+  const meta = safeMetadata(run);
+
   // Check if run already has canonical contract data embedded
   if (hasCanonicalMetadata(run) && hasExecutionProof(run)) {
-    const meta = run.metadata!;
-    const proofData = meta['executionProof'] as Record<string, unknown>;
-    const layersExecuted = meta['layers_executed'] as string[];
+    const proofData = (meta['executionProof'] as Record<string, unknown>) ?? {};
+    const layersExecuted = Array.isArray(meta['layers_executed'])
+      ? meta['layers_executed'] as string[]
+      : [];
 
-    const canonicalExecutionId = meta['execution_id'] as string;
-    // simulation_id: explicit in metadata, or fall back to run_id
-    const canonicalSimulationId = typeof meta['simulation_id'] === 'string'
-      ? meta['simulation_id']
-      : `sim-${run.run_id}`;
+    const canonicalExecutionId =
+      (typeof meta['execution_id'] === 'string' ? meta['execution_id'] : null)
+      ?? run.run_id;
+
+    const canonicalSimulationId =
+      (typeof meta['simulation_id'] === 'string' ? meta['simulation_id'] : null)
+      ?? `sim-${run.run_id}`;
+
+    const proofHash = typeof meta['proof_hash'] === 'string'
+      ? meta['proof_hash']
+      : deriveLegacyProofHash(run);
 
     const execution_metadata: ExecutionMetadata = {
       execution_id: canonicalExecutionId,
-      proof_hash: meta['proof_hash'] as string,
+      proof_hash: proofHash,
       layers_executed: layersExecuted,
-      schema_version: (meta['schema_version'] as string) ?? SCHEMA_VERSION,
+      schema_version: (typeof meta['schema_version'] === 'string' ? meta['schema_version'] : null) ?? SCHEMA_VERSION,
       environment: run.environment,
       started_at: run.started_at,
       completed_at: run.completed_at,
       duration_ms: run.duration_ms,
     };
 
+    const rawLayerRecords = Array.isArray(proofData['layerRecords'])
+      ? proofData['layerRecords'] as LayerRecord[]
+      : [];
+
     const executionProof: ExecutionProof = {
-      proof_hash: meta['proof_hash'] as string,
-      layerRecords: proofData['layerRecords'] as LayerRecord[],
-      generated_at: (proofData['generated_at'] as string) ?? run.completed_at,
+      proof_hash: proofHash,
+      layerRecords: rawLayerRecords,
+      generated_at: (typeof proofData['generated_at'] === 'string' ? proofData['generated_at'] : null) ?? run.completed_at,
     };
 
     const summary = run.result_summary ?? {};
     const totalLayers = executionProof.layerRecords.length;
-    const totalPassed = executionProof.layerRecords.reduce((n, lr) => n + lr.assertions_passed, 0);
-    const totalFailed = executionProof.layerRecords.reduce((n, lr) => n + lr.assertions_failed, 0);
+    const totalPassed = executionProof.layerRecords.reduce((n, lr) => n + (lr.assertions_passed ?? 0), 0);
+    const totalFailed = executionProof.layerRecords.reduce((n, lr) => n + (lr.assertions_failed ?? 0), 0);
 
     return {
       result: {
@@ -139,7 +162,7 @@ export function transformToCanonicalResult(run: Run): {
           total_layers: totalLayers,
           mandatory_layers_complete: checkMandatoryLayersComplete(layersExecuted),
         },
-        correlation_id: run.correlation_id,
+        correlation_id: run.correlation_id ?? null,
       },
       isLegacy: false,
     };
@@ -150,11 +173,14 @@ export function transformToCanonicalResult(run: Run): {
   const layerRecords = buildLegacyLayerRecords(run);
   const layersExecuted = layerRecords.map((lr) => lr.layer_name);
 
-  // Legacy: execution_id = run_id, simulation_id derived from run_id
-  const legacyExecutionId = run.run_id;
-  const legacySimulationId = typeof run.metadata?.['simulation_id'] === 'string'
-    ? run.metadata['simulation_id'] as string
-    : `sim-${run.run_id}`;
+  // Null-safe chain: metadata?.execution_id ?? run_id
+  const legacyExecutionId =
+    (typeof meta['execution_id'] === 'string' ? meta['execution_id'] : null)
+    ?? run.run_id;
+
+  const legacySimulationId =
+    (typeof meta['simulation_id'] === 'string' ? meta['simulation_id'] : null)
+    ?? `sim-${run.run_id}`;
 
   const execution_metadata: ExecutionMetadata = {
     execution_id: legacyExecutionId,
@@ -191,7 +217,7 @@ export function transformToCanonicalResult(run: Run): {
         total_layers: layerRecords.length,
         mandatory_layers_complete: false, // Legacy runs cannot confirm mandatory layers
       },
-      correlation_id: run.correlation_id,
+      correlation_id: run.correlation_id ?? null,
     },
     isLegacy: true,
   };

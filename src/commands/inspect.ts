@@ -133,6 +133,7 @@ export interface InspectScenarioInput {
  * Transform a Run to canonical contract shape and validate.
  * Logs debug info per ADR-008.
  * Returns validated result or CLIError.
+ * NEVER throws — all errors are returned as values.
  */
 function transformAndValidate(
   run: Run,
@@ -142,9 +143,9 @@ function transformAndValidate(
 
   const validationStatus: ValidationStatus = isLegacy ? 'legacy_transformed' : 'valid';
 
-  // DEBUG logging per requirement
+  // DEBUG logging per requirement — null-safe access
   logInspectDebug({
-    execution_id: result.execution_metadata.execution_id,
+    execution_id: result.execution_metadata?.execution_id ?? run.run_id,
     schema_version: SCHEMA_VERSION,
     validation_status: validationStatus,
     timestamp: new Date().toISOString(),
@@ -168,22 +169,47 @@ function transformAndValidate(
 }
 
 /**
+ * Safely transform a single Run, catching any unexpected errors.
+ * Returns null (with a warning log) instead of throwing.
+ */
+function safeTransformSingle(
+  run: Run,
+  requestId?: string
+): SimulationExecutionResult | null {
+  try {
+    const { result, validationError } = transformAndValidate(run, requestId);
+    if (validationError) {
+      console.warn('[RESULTS_INDEX_TRANSFORM_SKIPPED]', {
+        run_id: run.run_id,
+        reason: validationError.message,
+      });
+      return null;
+    }
+    return result;
+  } catch (err) {
+    console.warn('[RESULTS_INDEX_TRANSFORM_SKIPPED]', {
+      run_id: run.run_id,
+      reason: err instanceof Error ? err.message : 'Unknown transform error',
+    });
+    return null;
+  }
+}
+
+/**
  * Transform an array of Runs to canonical contract results.
+ * Skips invalid rows with a warning log instead of aborting.
  */
 function transformRuns(
   runs: Run[],
   requestId?: string
-): { results: SimulationExecutionResult[]; validationError?: CLIError } {
-  const results: SimulationExecutionResult[] = [];
-
-  for (const run of runs) {
-    const { result, validationError } = transformAndValidate(run, requestId);
-    if (validationError) {
-      // Return first validation error encountered
-      return { results: [], validationError };
-    }
-    results.push(result);
+): { results: SimulationExecutionResult[] } {
+  if (!runs || runs.length === 0) {
+    return { results: [] };
   }
+
+  const results = runs
+    .map((run) => safeTransformSingle(run, requestId))
+    .filter((r): r is SimulationExecutionResult => r !== null);
 
   return { results };
 }
@@ -218,16 +244,8 @@ export async function inspectRuns(
 
     const { runs, pagination } = await listRuns(filters, options);
 
-    // Transform to canonical contract shape
-    const { results, validationError } = transformRuns(runs);
-    if (validationError) {
-      return {
-        success: false,
-        runs: [],
-        error: validationError.message,
-        validationError,
-      };
-    }
+    // Transform to canonical contract shape — skips invalid rows
+    const { results } = transformRuns(runs);
 
     // Build executive synthesis from results
     const metrics = buildMetricsFromRuns(runs);
@@ -283,14 +301,13 @@ export async function inspectLatest(
       };
     }
 
-    // Transform to canonical contract shape
-    const { result, validationError } = transformAndValidate(run);
-    if (validationError) {
+    // Transform to canonical contract shape — safe, never throws
+    const result = safeTransformSingle(run);
+    if (!result) {
       return {
-        success: false,
+        success: true,
         run: null,
-        error: validationError.message,
-        validationError,
+        error: `Latest run '${run.run_id}' could not be transformed to contract shape`,
       };
     }
 
@@ -361,14 +378,13 @@ export async function inspectRun(
 
     const { run } = resolved;
 
-    // Transform to canonical contract shape
-    const { result, validationError } = transformAndValidate(run);
-    if (validationError) {
+    // Transform to canonical contract shape — safe, never throws
+    const result = safeTransformSingle(run);
+    if (!result) {
       return {
-        success: false,
+        success: true,
         run: null,
-        error: validationError.message,
-        validationError,
+        error: `Run '${input.runId}' could not be transformed to contract shape`,
       };
     }
 
@@ -434,17 +450,8 @@ export async function inspectScenario(
       options
     );
 
-    // Transform to canonical contract shape
-    const { results, validationError } = transformRuns(runs);
-    if (validationError) {
-      return {
-        success: false,
-        scenarioId: input.scenarioId,
-        runs: [],
-        error: validationError.message,
-        validationError,
-      };
-    }
+    // Transform to canonical contract shape — skips invalid rows
+    const { results } = transformRuns(runs);
 
     // Determine environment from runs or input
     const environment = input.environment ?? runs[0]?.environment ?? 'development';

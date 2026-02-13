@@ -65,6 +65,7 @@ interface RunIdParams {
 /**
  * Transform a Run to contract shape, validate, and log.
  * Returns the validated result or sends a structured error response.
+ * NEVER throws — all errors are returned as values.
  */
 function transformRunForResponse(
   run: Run,
@@ -72,9 +73,9 @@ function transformRunForResponse(
 ): { result: SimulationExecutionResult; error?: never } | { result?: never; error: ReturnType<typeof buildCLIError> } {
   const { result, isLegacy } = transformToCanonicalResult(run);
 
-  // DEBUG logging
+  // DEBUG logging — null-safe access
   logInspectDebug({
-    execution_id: result.execution_metadata.execution_id,
+    execution_id: result.execution_metadata?.execution_id ?? run.run_id,
     schema_version: SCHEMA_VERSION,
     validation_status: isLegacy ? 'legacy_transformed' : 'valid',
     timestamp: new Date().toISOString(),
@@ -93,6 +94,33 @@ function transformRunForResponse(
   }
 
   return { result };
+}
+
+/**
+ * Safely transform a single run, catching any unexpected errors.
+ * Returns null (with a warning log) instead of throwing.
+ */
+function safeTransformRun(
+  run: Run,
+  requestId: string
+): SimulationExecutionResult | null {
+  try {
+    const transformed = transformRunForResponse(run, requestId);
+    if (transformed.error) {
+      console.warn('[RESULTS_INDEX_TRANSFORM_SKIPPED]', {
+        run_id: run.run_id,
+        reason: transformed.error.message,
+      });
+      return null;
+    }
+    return transformed.result;
+  } catch (err) {
+    console.warn('[RESULTS_INDEX_TRANSFORM_SKIPPED]', {
+      run_id: run.run_id,
+      reason: err instanceof Error ? err.message : 'Unknown transform error',
+    });
+    return null;
+  }
 }
 
 /**
@@ -129,17 +157,21 @@ export async function listRunsHandler(
     const { runs, pagination } = await listRuns(filters, options);
     const queryTimeMs = Date.now() - startTime;
 
-    // Transform all runs to contract shape
-    const results: SimulationExecutionResult[] = [];
-    for (const run of runs) {
-      const transformed = transformRunForResponse(run, req.requestId);
-      if (transformed.error) {
-        throw new NotFoundError(
-          `Run '${run.run_id}' failed contract validation: ${transformed.error.message}`
-        );
-      }
-      results.push(transformed.result);
+    // Guard: empty result set
+    if (!runs || runs.length === 0) {
+      const response: SuccessResponse<SimulationExecutionResult[]> = {
+        data: [],
+        pagination,
+        metadata: { queryTimeMs, requestId: req.requestId },
+      };
+      res.status(200).json(response);
+      return;
     }
+
+    // Transform all runs — skip invalid rows instead of throwing
+    const results = runs
+      .map((run) => safeTransformRun(run, req.requestId))
+      .filter((r): r is SimulationExecutionResult => r !== null);
 
     const response: SuccessResponse<SimulationExecutionResult[]> = {
       data: results,
@@ -182,16 +214,16 @@ export async function getLastRunHandler(
       );
     }
 
-    // Transform to contract shape
-    const transformed = transformRunForResponse(run, req.requestId);
-    if (transformed.error) {
+    // Transform to contract shape — safe, never throws
+    const result = safeTransformRun(run, req.requestId);
+    if (!result) {
       throw new NotFoundError(
-        `Latest run failed contract validation: ${transformed.error.message}`
+        `Latest run '${run.run_id}' could not be transformed to contract shape`
       );
     }
 
     const response: SuccessResponse<SimulationExecutionResult> = {
-      data: transformed.result,
+      data: result,
       metadata: {
         queryTimeMs,
         requestId: req.requestId,
@@ -238,17 +270,16 @@ export async function getRunByIdHandler(
       throw new NotFoundError(`Run with ID '${id}' not found`);
     }
 
-    // Transform to contract shape
-    const transformed = transformRunForResponse(resolved.run, req.requestId);
-    if (transformed.error) {
-      // Per requirement: never 500 for not-found-like errors; return 404
+    // Transform to contract shape — safe, never throws
+    const result = safeTransformRun(resolved.run, req.requestId);
+    if (!result) {
       throw new NotFoundError(
-        `Run '${id}' resolved but failed contract validation: ${transformed.error.message}`
+        `Run '${id}' resolved but could not be transformed to contract shape`
       );
     }
 
     const response: SuccessResponse<SimulationExecutionResult> = {
-      data: transformed.result,
+      data: result,
       metadata: {
         queryTimeMs,
         requestId: req.requestId,
