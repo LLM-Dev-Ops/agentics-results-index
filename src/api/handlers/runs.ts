@@ -15,6 +15,7 @@ import {
   getLastRun,
   getArtifactsByRun,
   resolveRunById,
+  QueryFailureError,
 } from '../../data/repository';
 import { NotFoundError } from '../middleware/error-handler';
 import {
@@ -184,6 +185,20 @@ export async function listRunsHandler(
 
     res.status(200).json(response);
   } catch (err) {
+    // QueryFailure from repository → return 200 with empty list, never 500
+    if (err instanceof QueryFailureError) {
+      console.warn('[RESULTS_INDEX_LIST_FALLBACK]', {
+        reason: err.message,
+        requestId: req.requestId,
+      });
+      const fallback: SuccessResponse<SimulationExecutionResult[]> = {
+        data: [],
+        pagination: { offset: 0, limit: 0, total: 0 },
+        metadata: { queryTimeMs: 0, requestId: req.requestId },
+      };
+      res.status(200).json(fallback);
+      return;
+    }
     next(err);
   }
 }

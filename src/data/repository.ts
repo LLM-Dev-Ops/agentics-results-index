@@ -146,29 +146,48 @@ function getPeriodSince(period: SummaryPeriod): Date {
 // ============================================================================
 
 /**
- * List runs with filters and pagination
+ * Custom error for query failures — caught by handlers to return 200 not 500.
+ */
+export class QueryFailureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QueryFailureError';
+  }
+}
+
+/**
+ * List runs with filters and pagination.
+ * Wraps query execution so NULL metadata rows never crash.
  */
 export async function listRuns(
   filters: RunFilters,
   options: QueryOptions
 ): Promise<{ runs: Run[]; pagination: Pagination }> {
-  // Execute count query for total
-  const countQuery = buildRunsCountQuery(filters);
-  const countResult = await executeReadOnlyQuery<CountRow>(countQuery.sql, countQuery.params);
-  const total = parseInt(countResult.rows[0]?.total ?? '0', 10);
+  try {
+    // Execute count query for total
+    const countQuery = buildRunsCountQuery(filters);
+    const countResult = await executeReadOnlyQuery<CountRow>(countQuery.sql, countQuery.params);
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10);
 
-  // Execute list query
-  const listQuery = buildRunsListQuery(filters, options);
-  const listResult = await executeReadOnlyQuery<RunRow>(listQuery.sql, listQuery.params);
+    // Execute list query
+    const listQuery = buildRunsListQuery(filters, options);
+    const listResult = await executeReadOnlyQuery<RunRow>(listQuery.sql, listQuery.params);
 
-  return {
-    runs: listResult.rows.map(mapRowToRun),
-    pagination: {
-      offset: options.offset,
-      limit: options.limit,
-      total,
-    },
-  };
+    return {
+      runs: listResult.rows.map(mapRowToRun),
+      pagination: {
+        offset: options.offset,
+        limit: options.limit,
+        total,
+      },
+    };
+  } catch (err) {
+    console.error('[RESULTS_INDEX_QUERY_ERROR]', {
+      operation: 'listRuns',
+      message: err instanceof Error ? err.message : 'Unknown query error',
+    });
+    throw new QueryFailureError('QueryFailure');
+  }
 }
 
 /**
@@ -284,14 +303,22 @@ export async function getLastRun(
   environment: Environment,
   scenario?: string
 ): Promise<Run | null> {
-  const query = buildLastRunQuery(environment, scenario);
-  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
+  try {
+    const query = buildLastRunQuery(environment, scenario);
+    const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
 
-  if (result.rows.length === 0) {
-    return null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapRowToRun(result.rows[0]!);
+  } catch (err) {
+    console.error('[RESULTS_INDEX_QUERY_ERROR]', {
+      operation: 'getLastRun',
+      message: err instanceof Error ? err.message : 'Unknown query error',
+    });
+    throw new QueryFailureError('QueryFailure');
   }
-
-  return mapRowToRun(result.rows[0]!);
 }
 
 /**
@@ -385,23 +412,31 @@ export async function getRunsByScenario(
   filters: Omit<RunFilters, 'scenario'>,
   options: QueryOptions
 ): Promise<{ runs: Run[]; pagination: Pagination }> {
-  // Count query
-  const countQuery = buildRunsCountQuery({ ...filters, scenario: scenarioId });
-  const countResult = await executeReadOnlyQuery<CountRow>(countQuery.sql, countQuery.params);
-  const total = parseInt(countResult.rows[0]?.total ?? '0', 10);
+  try {
+    // Count query
+    const countQuery = buildRunsCountQuery({ ...filters, scenario: scenarioId });
+    const countResult = await executeReadOnlyQuery<CountRow>(countQuery.sql, countQuery.params);
+    const total = parseInt(countResult.rows[0]?.total ?? '0', 10);
 
-  // List query
-  const listQuery = buildRunsByScenarioQuery(scenarioId, filters, options);
-  const listResult = await executeReadOnlyQuery<RunRow>(listQuery.sql, listQuery.params);
+    // List query
+    const listQuery = buildRunsByScenarioQuery(scenarioId, filters, options);
+    const listResult = await executeReadOnlyQuery<RunRow>(listQuery.sql, listQuery.params);
 
-  return {
-    runs: listResult.rows.map(mapRowToRun),
-    pagination: {
-      offset: options.offset,
-      limit: options.limit,
-      total,
-    },
-  };
+    return {
+      runs: listResult.rows.map(mapRowToRun),
+      pagination: {
+        offset: options.offset,
+        limit: options.limit,
+        total,
+      },
+    };
+  } catch (err) {
+    console.error('[RESULTS_INDEX_QUERY_ERROR]', {
+      operation: 'getRunsByScenario',
+      message: err instanceof Error ? err.message : 'Unknown query error',
+    });
+    throw new QueryFailureError('QueryFailure');
+  }
 }
 
 /**
