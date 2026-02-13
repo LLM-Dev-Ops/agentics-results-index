@@ -28,8 +28,8 @@ export function createServer(): Application {
   // Request ID assignment (for tracing)
   app.use(assignRequestId);
 
-  // JSON parsing (limited size for safety)
-  app.use(express.json({ limit: '1kb' })); // Minimal - GET requests have no body
+  // JSON parsing (sized for POST result packet ingestion)
+  app.use(express.json({ limit: '1mb' }));
 
   // Request logging (simple, no sensitive data)
   app.use((req: Request, _res: Response, next) => {
@@ -49,7 +49,7 @@ export function createServer(): Application {
 
   app.use((_req: Request, res: Response, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.header('Access-Control-Max-Age', '86400');
 
@@ -73,11 +73,12 @@ export function createServer(): Application {
     res.json({
       service: 'agentics-results-index',
       version: '1.0.0',
-      description: 'Read-only query service for inspecting completed Agentics runs',
+      description: 'Contract-aligned query and ingestion service for Agentics runs',
       documentation: '/api/v1/health',
       endpoints: {
         health: 'GET /api/v1/health',
         runs: 'GET /api/v1/runs',
+        ingestRun: 'POST /api/v1/runs',
         lastRun: 'GET /api/v1/runs/last',
         runById: 'GET /api/v1/runs/:id',
         artifacts: 'GET /api/v1/runs/:id/artifacts',

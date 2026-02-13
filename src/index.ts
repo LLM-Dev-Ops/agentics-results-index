@@ -1,20 +1,32 @@
 /**
  * agentics-results-index
  *
- * Read-only query service for inspecting completed Agentics runs.
+ * Contract-aligned query and ingestion service for Agentics runs.
  *
- * This service is the READ side of the Agentics CQRS split.
- * It NEVER executes simulations, mutates state, or owns schemas.
+ * This service enforces strict contract compliance via agentics-contracts
+ * schemas. All payloads are validated at runtime. Storage failures are
+ * never silently swallowed.
  *
  * @see /plans/SPARC_SPECIFICATION.md
  */
 
 import { createServer, startServer } from './server';
 import { initPool, closePool } from './data/pool';
-import { loadConfig } from './config';
+import { initWritePool, closeWritePool } from './data/write-pool';
+import { loadConfig, enforceStorageConfig } from './config';
 
 async function main(): Promise<void> {
   console.log('[startup] agentics-results-index starting...');
+
+  // Enforce storage backend configuration BEFORE loading config.
+  // If storage URL or credentials are missing, fail immediately.
+  try {
+    enforceStorageConfig();
+    console.log('[startup] Storage backend configuration verified');
+  } catch (err) {
+    console.error('[startup] Storage configuration failed:', (err as Error).message);
+    process.exit(1);
+  }
 
   // Load configuration from environment
   try {
@@ -25,12 +37,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Initialize database connection pool
+  // Initialize read-only database connection pool
   try {
     initPool();
     console.log('[startup] Database connection pool initialized (read-only mode)');
   } catch (err) {
     console.error('[startup] Failed to initialize database pool:', (err as Error).message);
+    process.exit(1);
+  }
+
+  // Initialize write connection pool for result packet ingestion
+  try {
+    initWritePool();
+    console.log('[startup] Write connection pool initialized');
+  } catch (err) {
+    console.error('[startup] Failed to initialize write pool:', (err as Error).message);
     process.exit(1);
   }
 
@@ -41,12 +62,12 @@ async function main(): Promise<void> {
   // Handle uncaught errors
   process.on('uncaughtException', (err) => {
     console.error('[fatal] Uncaught exception:', err.message);
-    closePool().finally(() => process.exit(1));
+    Promise.all([closePool(), closeWritePool()]).finally(() => process.exit(1));
   });
 
   process.on('unhandledRejection', (reason) => {
     console.error('[fatal] Unhandled rejection:', reason);
-    closePool().finally(() => process.exit(1));
+    Promise.all([closePool(), closeWritePool()]).finally(() => process.exit(1));
   });
 }
 

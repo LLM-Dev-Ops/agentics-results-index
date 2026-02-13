@@ -185,18 +185,19 @@ export async function listRunsHandler(
 
     res.status(200).json(response);
   } catch (err) {
-    // QueryFailure from repository → return 200 with empty list, never 500
     if (err instanceof QueryFailureError) {
-      console.warn('[RESULTS_INDEX_LIST_FALLBACK]', {
+      console.error('[RESULTS_INDEX_QUERY_FAILURE]', {
         reason: err.message,
         requestId: req.requestId,
       });
-      const fallback: SuccessResponse<SimulationExecutionResult[]> = {
-        data: [],
-        pagination: { offset: 0, limit: 0, total: 0 },
-        metadata: { queryTimeMs: 0, requestId: req.requestId },
-      };
-      res.status(200).json(fallback);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Query execution failed',
+          requestId: req.requestId,
+          timestamp: new Date().toISOString(),
+        },
+      });
       return;
     }
     next(err);
@@ -237,10 +238,18 @@ export async function getLastRunHandler(
       metadata: { requestId: req.requestId },
     });
   } catch (err) {
-    console.error('[RESULTS_INDEX_LAST_ERROR]', err);
-
-    // HARD FAILSAFE — NEVER RETURN 500
-    res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+    console.error('[RESULTS_INDEX_LAST_ERROR]', {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      requestId: req.requestId,
+    });
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to retrieve last run',
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
   }
 }
 
@@ -293,10 +302,19 @@ export async function getRunByIdHandler(
       metadata: { requestId: req.requestId },
     });
   } catch (err) {
-    console.error('[RESULTS_INDEX_RESOLVE_ERROR]', err);
-
-    // HARD FAILSAFE — NEVER RETURN 500
-    res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+    console.error('[RESULTS_INDEX_RESOLVE_ERROR]', {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      id: req.params['id'],
+      requestId: req.requestId,
+    });
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to resolve run',
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+      },
+    });
   }
 }
 

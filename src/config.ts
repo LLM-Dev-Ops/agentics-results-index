@@ -109,3 +109,26 @@ export function getConfig(): Config {
 export function resetConfig(): void {
   configInstance = null;
 }
+
+/**
+ * Enforce storage backend configuration at startup.
+ * If storage backend URL or credentials are missing, fail immediately.
+ * DO NOT allow partial operation.
+ */
+export function enforceStorageConfig(): void {
+  const hasDbHost = process.env['RESULTS_DB_HOST'] || process.env['RUVECTOR_DB_HOST'];
+  const hasDbPassword = process.env['RESULTS_DB_PASSWORD'] || process.env['RUVECTOR_DB_PASSWORD'];
+  const hasSocketPath = process.env['CLOUDSQL_SOCKET_PATH'] || process.env['INSTANCE_UNIX_SOCKET'];
+
+  if (!hasDbHost && !hasSocketPath) {
+    throw new Error(
+      'Storage backend not configured. Set RESULTS_DB_HOST (or RUVECTOR_DB_HOST) or CLOUDSQL_SOCKET_PATH.'
+    );
+  }
+
+  if (!hasDbPassword && !hasSocketPath) {
+    throw new Error(
+      'Database credentials not configured. Set RESULTS_DB_PASSWORD or RUVECTOR_DB_PASSWORD.'
+    );
+  }
+}

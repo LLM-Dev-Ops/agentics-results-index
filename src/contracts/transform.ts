@@ -10,10 +10,8 @@
 
 import { createHash } from 'crypto';
 import type { Run } from '../types';
-import type { SimulationExecutionResult } from './simulation';
-import type { ExecutionMetadata, ExecutionProof, LayerRecord } from './execution';
-import { MANDATORY_LAYERS } from './execution';
-import { SCHEMA_VERSION } from './simulation';
+import type { SimulationExecutionResult, ExecutionMetadata, ExecutionProof, LayerRecord } from 'agentics-contracts';
+import { MANDATORY_LAYERS, SCHEMA_VERSION } from 'agentics-contracts';
 
 /**
  * Check whether a Run already contains canonical contract data

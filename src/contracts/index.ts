@@ -1,30 +1,37 @@
 /**
  * agentics-contracts
  *
- * Canonical contract types for the Agentics platform.
- * All inspect responses MUST conform to these contracts.
- *
- * Import paths:
- *   contracts/execution
- *   contracts/simulation
- *   contracts/observability
+ * Re-exports canonical contract types and schemas from the
+ * agentics-contracts package. Results-index does NOT define its own
+ * result packet shape — all types originate from the contracts package.
  */
 
-// Re-export all contract types
+// Re-export canonical types from agentics-contracts package
 export type {
   ExecutionMetadata,
   ExecutionProof,
   LayerRecord,
   MandatoryLayer,
-} from './execution';
-export { MANDATORY_LAYERS } from './execution';
-
-export type {
   SimulationExecutionResult,
   SimulationResultSummary,
-} from './simulation';
-export { SCHEMA_VERSION } from './simulation';
+  ResultPacket,
+  ExecutionContext,
+} from 'agentics-contracts';
 
+// Re-export canonical schemas and constants from agentics-contracts package
+export {
+  MANDATORY_LAYERS,
+  SCHEMA_VERSION,
+  ResultPacketSchema,
+  SimulationExecutionResultSchema,
+  ExecutionMetadataSchema,
+  ExecutionProofSchema,
+  LayerRecordSchema,
+  SimulationResultSummarySchema,
+  ExecutionContextSchema,
+} from 'agentics-contracts';
+
+// Re-export local observability utilities (results-index specific, not contract definitions)
 export type {
   ValidationStatus,
   InspectDebugLog,
@@ -33,6 +40,7 @@ export type {
 } from './observability';
 export { logInspectDebug, logResultsIndexLookup } from './observability';
 
+// Re-export local validation utilities
 export {
   validateAgainstSchema,
   buildCLIError,
@@ -43,4 +51,5 @@ export type {
   ValidationFailure,
 } from './validation';
 
+// Re-export local transform utilities
 export { transformToCanonicalResult } from './transform';

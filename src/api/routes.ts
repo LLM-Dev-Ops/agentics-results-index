@@ -15,6 +15,7 @@ import {
   getRunByIdHandler,
   getRunArtifactsHandler,
 } from './handlers/runs';
+import { ingestResultHandler } from './handlers/ingest';
 import {
   listScenariosHandler,
   getScenarioByIdHandler,
@@ -57,6 +58,10 @@ export function createApiRouter(): Router {
 
   // GET /runs - list runs with filters
   router.get('/runs', validateQuery(runsQuerySchema), listRunsHandler);
+
+  // POST /runs - ingest contract-compliant result packet
+  router.post('/runs', ingestResultHandler);
+
   router.all('/runs', methodNotAllowedHandler);
 
   // GET /runs/:id - get single run

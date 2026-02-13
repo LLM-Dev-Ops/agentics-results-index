@@ -1,0 +1,11 @@
+{
+  "name": "agentics-contracts",
+  "version": "1.0.0",
+  "description": "Canonical contract schemas for the Agentics platform",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "peerDependencies": {
+    "zod": "^3.22.0"
+  }
+}
