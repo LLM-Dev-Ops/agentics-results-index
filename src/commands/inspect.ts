@@ -2,7 +2,8 @@
  * Inspect Command
  *
  * Provides programmatic access to run inspection with executive synthesis.
- * Used for results analysis and decision support.
+ * All results are validated against SimulationExecutionResult contract
+ * before returning. Legacy data is transparently transformed.
  */
 
 import {
@@ -26,6 +27,20 @@ import type {
   Pagination,
 } from '../types';
 
+// Import ONLY from contracts
+import type {
+  SimulationExecutionResult,
+  CLIError,
+  ValidationStatus,
+} from '../contracts';
+import {
+  transformToCanonicalResult,
+  validateAgainstSchema,
+  buildCLIError,
+  logInspectDebug,
+  SCHEMA_VERSION,
+} from '../contracts';
+
 // ============================================================================
 // Result Types
 // ============================================================================
@@ -35,10 +50,11 @@ import type {
  */
 export interface InspectCommandResult {
   success: boolean;
-  runs: Run[];
+  runs: SimulationExecutionResult[];
   pagination?: Pagination;
   synthesis?: ExecutiveSummary;
   error?: string;
+  validationError?: CLIError;
 }
 
 /**
@@ -46,9 +62,10 @@ export interface InspectCommandResult {
  */
 export interface InspectLatestResult {
   success: boolean;
-  run: Run | null;
+  run: SimulationExecutionResult | null;
   synthesis?: ExecutiveSummary;
   error?: string;
+  validationError?: CLIError;
 }
 
 /**
@@ -56,9 +73,10 @@ export interface InspectLatestResult {
  */
 export interface InspectRunResult {
   success: boolean;
-  run: Run | null;
+  run: SimulationExecutionResult | null;
   synthesis?: ExecutiveSummary;
   error?: string;
+  validationError?: CLIError;
 }
 
 /**
@@ -67,10 +85,11 @@ export interface InspectRunResult {
 export interface InspectScenarioResult {
   success: boolean;
   scenarioId: string;
-  runs: Run[];
+  runs: SimulationExecutionResult[];
   pagination?: Pagination;
   synthesis?: ExecutiveSummary;
   error?: string;
+  validationError?: CLIError;
 }
 
 // ============================================================================
@@ -105,6 +124,69 @@ export interface InspectScenarioInput {
 }
 
 // ============================================================================
+// Contract Transformation Helpers
+// ============================================================================
+
+/**
+ * Transform a Run to canonical contract shape and validate.
+ * Logs debug info per ADR-008.
+ * Returns validated result or CLIError.
+ */
+function transformAndValidate(
+  run: Run,
+  requestId?: string
+): { result: SimulationExecutionResult; validationError?: CLIError } {
+  const { result, isLegacy } = transformToCanonicalResult(run);
+
+  const validationStatus: ValidationStatus = isLegacy ? 'legacy_transformed' : 'valid';
+
+  // DEBUG logging per requirement
+  logInspectDebug({
+    execution_id: result.execution_metadata.execution_id,
+    schema_version: SCHEMA_VERSION,
+    validation_status: validationStatus,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Validate against schema
+  const failures = validateAgainstSchema('SimulationExecutionResult', result);
+  if (failures) {
+    const cliError = buildCLIError(requestId ?? 'unknown', failures);
+    // Log validation failure
+    logInspectDebug({
+      execution_id: result.execution_metadata?.execution_id ?? run.run_id,
+      schema_version: SCHEMA_VERSION,
+      validation_status: 'invalid',
+      timestamp: new Date().toISOString(),
+    });
+    return { result, validationError: cliError };
+  }
+
+  return { result };
+}
+
+/**
+ * Transform an array of Runs to canonical contract results.
+ */
+function transformRuns(
+  runs: Run[],
+  requestId?: string
+): { results: SimulationExecutionResult[]; validationError?: CLIError } {
+  const results: SimulationExecutionResult[] = [];
+
+  for (const run of runs) {
+    const { result, validationError } = transformAndValidate(run, requestId);
+    if (validationError) {
+      // Return first validation error encountered
+      return { results: [], validationError };
+    }
+    results.push(result);
+  }
+
+  return { results };
+}
+
+// ============================================================================
 // Command Functions
 // ============================================================================
 
@@ -134,6 +216,17 @@ export async function inspectRuns(
 
     const { runs, pagination } = await listRuns(filters, options);
 
+    // Transform to canonical contract shape
+    const { results, validationError } = transformRuns(runs);
+    if (validationError) {
+      return {
+        success: false,
+        runs: [],
+        error: validationError.message,
+        validationError,
+      };
+    }
+
     // Build executive synthesis from results
     const metrics = buildMetricsFromRuns(runs);
 
@@ -145,7 +238,7 @@ export async function inspectRuns(
         commit_sha: process.env['GIT_SHA'],
       },
       metrics,
-      ['results index query', 'response parsing', 'synthesis generation']
+      ['results index query', 'contract transformation', 'response parsing', 'synthesis generation']
     );
 
     // Elevate risk for production environments
@@ -155,7 +248,7 @@ export async function inspectRuns(
 
     return {
       success: true,
-      runs,
+      runs: results,
       pagination,
       synthesis,
     };
@@ -188,6 +281,17 @@ export async function inspectLatest(
       };
     }
 
+    // Transform to canonical contract shape
+    const { result, validationError } = transformAndValidate(run);
+    if (validationError) {
+      return {
+        success: false,
+        run: null,
+        error: validationError.message,
+        validationError,
+      };
+    }
+
     // Build synthesis from single run
     const metrics = buildMetricsFromRuns([run]);
 
@@ -199,7 +303,7 @@ export async function inspectLatest(
         commit_sha: process.env['GIT_SHA'],
       },
       metrics,
-      ['results index query', 'response parsing', 'synthesis generation']
+      ['results index query', 'contract transformation', 'response parsing', 'synthesis generation']
     );
 
     // Elevate risk for production environments
@@ -209,7 +313,7 @@ export async function inspectLatest(
 
     return {
       success: true,
-      run,
+      run: result,
       synthesis,
     };
   } catch (err) {
@@ -241,6 +345,17 @@ export async function inspectRun(
       };
     }
 
+    // Transform to canonical contract shape
+    const { result, validationError } = transformAndValidate(run);
+    if (validationError) {
+      return {
+        success: false,
+        run: null,
+        error: validationError.message,
+        validationError,
+      };
+    }
+
     // Build synthesis from single run
     const metrics = buildMetricsFromRuns([run]);
 
@@ -252,7 +367,7 @@ export async function inspectRun(
         commit_sha: process.env['GIT_SHA'],
       },
       metrics,
-      ['results index query', 'response parsing', 'synthesis generation']
+      ['results index query', 'contract transformation', 'response parsing', 'synthesis generation']
     );
 
     // Elevate risk for production environments
@@ -262,7 +377,7 @@ export async function inspectRun(
 
     return {
       success: true,
-      run,
+      run: result,
       synthesis,
     };
   } catch (err) {
@@ -303,6 +418,18 @@ export async function inspectScenario(
       options
     );
 
+    // Transform to canonical contract shape
+    const { results, validationError } = transformRuns(runs);
+    if (validationError) {
+      return {
+        success: false,
+        scenarioId: input.scenarioId,
+        runs: [],
+        error: validationError.message,
+        validationError,
+      };
+    }
+
     // Determine environment from runs or input
     const environment = input.environment ?? runs[0]?.environment ?? 'development';
 
@@ -317,7 +444,7 @@ export async function inspectScenario(
         commit_sha: process.env['GIT_SHA'],
       },
       metrics,
-      ['results index query', 'response parsing', 'synthesis generation']
+      ['results index query', 'contract transformation', 'response parsing', 'synthesis generation']
     );
 
     // Elevate risk for production environments
@@ -328,7 +455,7 @@ export async function inspectScenario(
     return {
       success: true,
       scenarioId: input.scenarioId,
-      runs,
+      runs: results,
       pagination,
       synthesis,
     };
