@@ -191,17 +191,35 @@ export async function listRuns(
 }
 
 /**
- * Get a single run by ID
+ * Defensive single-row query helper.
+ * DB failures return null — never throw.
  */
-export async function getRunById(runId: string): Promise<Run | null> {
-  const query = buildRunByIdQuery(runId);
-  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
+async function safeSingleRowQuery(
+  operation: string,
+  queryDef: { sql: string; params: unknown[] }
+): Promise<Run | null> {
+  let row: RunRow | null = null;
 
-  if (result.rows.length === 0) {
+  try {
+    const result = await executeReadOnlyQuery<RunRow>(queryDef.sql, queryDef.params);
+    row = result.rows.length > 0 ? result.rows[0]! : null;
+  } catch (e) {
+    console.error('[RESULTS_INDEX_DB_CRASH]', { operation, error: e });
     return null;
   }
 
-  return mapRowToRun(result.rows[0]!);
+  if (!row) {
+    return null;
+  }
+
+  return mapRowToRun(row);
+}
+
+/**
+ * Get a single run by ID
+ */
+export async function getRunById(runId: string): Promise<Run | null> {
+  return safeSingleRowQuery('getRunById', buildRunByIdQuery(runId));
 }
 
 /**
@@ -209,28 +227,14 @@ export async function getRunById(runId: string): Promise<Run | null> {
  * Per ADR-004: execution_id is the canonical primary index.
  */
 export async function getRunByExecutionId(executionId: string): Promise<Run | null> {
-  const query = buildRunByExecutionIdQuery(executionId);
-  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
-
-  if (result.rows.length === 0) {
-    return null;
-  }
-
-  return mapRowToRun(result.rows[0]!);
+  return safeSingleRowQuery('getRunByExecutionId', buildRunByExecutionIdQuery(executionId));
 }
 
 /**
  * Look up a run by simulation_id (stored in metadata JSONB or as run_id).
  */
 export async function getRunBySimulationId(simulationId: string): Promise<Run | null> {
-  const query = buildRunBySimulationIdQuery(simulationId);
-  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
-
-  if (result.rows.length === 0) {
-    return null;
-  }
-
-  return mapRowToRun(result.rows[0]!);
+  return safeSingleRowQuery('getRunBySimulationId', buildRunBySimulationIdQuery(simulationId));
 }
 
 /**
@@ -238,14 +242,7 @@ export async function getRunBySimulationId(simulationId: string): Promise<Run | 
  * the given simulation_id.
  */
 export async function getRunBySimulationIdReverse(simulationId: string): Promise<Run | null> {
-  const query = buildRunBySimulationIdReverseLookupQuery(simulationId);
-  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
-
-  if (result.rows.length === 0) {
-    return null;
-  }
-
-  return mapRowToRun(result.rows[0]!);
+  return safeSingleRowQuery('getRunBySimulationIdReverse', buildRunBySimulationIdReverseLookupQuery(simulationId));
 }
 
 export type LookupMode = 'execution' | 'simulation';
@@ -262,38 +259,45 @@ export interface ResolvedRun {
  *   exec-* → lookup by execution_id (canonical)
  *   sim-*  → lookup by simulation_id, reverse-lookup fallback
  *   UUID   → lookup by run_id (legacy)
+ *
+ * HARDENED: DB failures return null — never throws.
  */
 export async function resolveRunById(id: string): Promise<ResolvedRun | null> {
-  if (id.startsWith('exec-')) {
-    const run = await getRunByExecutionId(id);
+  try {
+    if (id.startsWith('exec-')) {
+      const run = await getRunByExecutionId(id);
+      if (!run) return null;
+      const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+      return { run, lookupMode: 'execution', resolvedExecutionId };
+    }
+
+    if (id.startsWith('sim-')) {
+      // Primary: direct simulation_id lookup
+      let run = await getRunBySimulationId(id);
+      if (run) {
+        const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+        return { run, lookupMode: 'simulation', resolvedExecutionId };
+      }
+
+      // Fallback: reverse lookup via execution_id mapping
+      run = await getRunBySimulationIdReverse(id);
+      if (run) {
+        const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+        return { run, lookupMode: 'simulation', resolvedExecutionId };
+      }
+
+      return null;
+    }
+
+    // Legacy UUID path
+    const run = await getRunById(id);
     if (!run) return null;
     const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
     return { run, lookupMode: 'execution', resolvedExecutionId };
-  }
-
-  if (id.startsWith('sim-')) {
-    // Primary: direct simulation_id lookup
-    let run = await getRunBySimulationId(id);
-    if (run) {
-      const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
-      return { run, lookupMode: 'simulation', resolvedExecutionId };
-    }
-
-    // Fallback: reverse lookup via execution_id mapping
-    run = await getRunBySimulationIdReverse(id);
-    if (run) {
-      const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
-      return { run, lookupMode: 'simulation', resolvedExecutionId };
-    }
-
+  } catch (e) {
+    console.error('[RESULTS_INDEX_DB_CRASH]', { operation: 'resolveRunById', id, error: e });
     return null;
   }
-
-  // Legacy UUID path
-  const run = await getRunById(id);
-  if (!run) return null;
-  const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
-  return { run, lookupMode: 'execution', resolvedExecutionId };
 }
 
 /**

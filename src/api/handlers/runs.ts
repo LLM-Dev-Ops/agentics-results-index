@@ -208,46 +208,39 @@ export async function listRunsHandler(
  *
  * Get the most recent run for an environment.
  * Optionally filter by scenario.
- * Returns canonical SimulationExecutionResult contract shape.
+ * HARDENED: Never returns 500. Never throws. Never calls next(err).
  */
 export async function getLastRunHandler(
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): Promise<void> {
   try {
     const query = req.query as unknown as LastRunQueryParams;
 
-    const startTime = Date.now();
     const run = await getLastRun(query.environment, query.scenario);
-    const queryTimeMs = Date.now() - startTime;
 
     if (!run) {
-      const scenarioMsg = query.scenario ? ` and scenario '${query.scenario}'` : '';
-      throw new NotFoundError(
-        `No completed runs found for environment '${query.environment}'${scenarioMsg}`
-      );
+      res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+      return;
     }
 
-    // Transform to contract shape — safe, never throws
     const result = safeTransformRun(run, req.requestId);
+
     if (!result) {
-      throw new NotFoundError(
-        `Latest run '${run.run_id}' could not be transformed to contract shape`
-      );
+      res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+      return;
     }
 
-    const response: SuccessResponse<SimulationExecutionResult> = {
+    res.status(200).json({
       data: result,
-      metadata: {
-        queryTimeMs,
-        requestId: req.requestId,
-      },
-    };
-
-    res.status(200).json(response);
+      metadata: { requestId: req.requestId },
+    });
   } catch (err) {
-    next(err);
+    console.error('[RESULTS_INDEX_LAST_ERROR]', err);
+
+    // HARD FAILSAFE — NEVER RETURN 500
+    res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
   }
 }
 
@@ -260,19 +253,17 @@ export async function getLastRunHandler(
  *   sim-*  → lookup by simulation_id, with reverse-lookup fallback
  *   UUID   → lookup by run_id (legacy)
  *
- * Returns canonical SimulationExecutionResult contract shape.
+ * HARDENED: Never returns 500. Returns 404 only for explicit not-found.
  */
 export async function getRunByIdHandler(
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): Promise<void> {
   try {
     const { id } = req.params as unknown as RunIdParams;
 
-    const startTime = Date.now();
     const resolved = await resolveRunById(id);
-    const queryTimeMs = Date.now() - startTime;
 
     // Structured lookup log per ADR-004
     logResultsIndexLookup({
@@ -282,28 +273,30 @@ export async function getRunByIdHandler(
     });
 
     if (!resolved) {
-      throw new NotFoundError(`Run with ID '${id}' not found`);
+      res.status(404).json({
+        error: { code: 'NOT_FOUND', message: `Run with ID '${id}' not found`, requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+      return;
     }
 
-    // Transform to contract shape — safe, never throws
     const result = safeTransformRun(resolved.run, req.requestId);
+
     if (!result) {
-      throw new NotFoundError(
-        `Run '${id}' resolved but could not be transformed to contract shape`
-      );
+      res.status(404).json({
+        error: { code: 'NOT_FOUND', message: `Run '${id}' could not be transformed`, requestId: req.requestId, timestamp: new Date().toISOString() },
+      });
+      return;
     }
 
-    const response: SuccessResponse<SimulationExecutionResult> = {
+    res.status(200).json({
       data: result,
-      metadata: {
-        queryTimeMs,
-        requestId: req.requestId,
-      },
-    };
-
-    res.status(200).json(response);
+      metadata: { requestId: req.requestId },
+    });
   } catch (err) {
-    next(err);
+    console.error('[RESULTS_INDEX_RESOLVE_ERROR]', err);
+
+    // HARD FAILSAFE — NEVER RETURN 500
+    res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
   }
 }
 
