@@ -14,6 +14,7 @@ import {
   getRunById,
   getLastRun,
   getArtifactsByRun,
+  resolveRunById,
 } from '../../data/repository';
 import { NotFoundError } from '../middleware/error-handler';
 import {
@@ -36,6 +37,7 @@ import {
   validateAgainstSchema,
   buildCLIError,
   logInspectDebug,
+  logResultsIndexLookup,
   SCHEMA_VERSION,
 } from '../../contracts';
 
@@ -132,8 +134,9 @@ export async function listRunsHandler(
     for (const run of runs) {
       const transformed = transformRunForResponse(run, req.requestId);
       if (transformed.error) {
-        res.status(500).json({ error: transformed.error });
-        return;
+        throw new NotFoundError(
+          `Run '${run.run_id}' failed contract validation: ${transformed.error.message}`
+        );
       }
       results.push(transformed.result);
     }
@@ -182,8 +185,9 @@ export async function getLastRunHandler(
     // Transform to contract shape
     const transformed = transformRunForResponse(run, req.requestId);
     if (transformed.error) {
-      res.status(500).json({ error: transformed.error });
-      return;
+      throw new NotFoundError(
+        `Latest run failed contract validation: ${transformed.error.message}`
+      );
     }
 
     const response: SuccessResponse<SimulationExecutionResult> = {
@@ -204,6 +208,11 @@ export async function getLastRunHandler(
  * GET /api/v1/runs/:id
  *
  * Get a single run by its ID.
+ * Supports ADR-004 dual resolution:
+ *   exec-* → lookup by execution_id (canonical)
+ *   sim-*  → lookup by simulation_id, with reverse-lookup fallback
+ *   UUID   → lookup by run_id (legacy)
+ *
  * Returns canonical SimulationExecutionResult contract shape.
  */
 export async function getRunByIdHandler(
@@ -215,18 +224,27 @@ export async function getRunByIdHandler(
     const { id } = req.params as unknown as RunIdParams;
 
     const startTime = Date.now();
-    const run = await getRunById(id);
+    const resolved = await resolveRunById(id);
     const queryTimeMs = Date.now() - startTime;
 
-    if (!run) {
+    // Structured lookup log per ADR-004
+    logResultsIndexLookup({
+      input_id: id,
+      resolved_execution_id: resolved?.resolvedExecutionId ?? null,
+      lookup_mode: id.startsWith('sim-') ? 'simulation' : 'execution',
+    });
+
+    if (!resolved) {
       throw new NotFoundError(`Run with ID '${id}' not found`);
     }
 
     // Transform to contract shape
-    const transformed = transformRunForResponse(run, req.requestId);
+    const transformed = transformRunForResponse(resolved.run, req.requestId);
     if (transformed.error) {
-      res.status(500).json({ error: transformed.error });
-      return;
+      // Per requirement: never 500 for not-found-like errors; return 404
+      throw new NotFoundError(
+        `Run '${id}' resolved but failed contract validation: ${transformed.error.message}`
+      );
     }
 
     const response: SuccessResponse<SimulationExecutionResult> = {
@@ -247,6 +265,7 @@ export async function getRunByIdHandler(
  * GET /api/v1/runs/:id/artifacts
  *
  * Get artifact references for a run.
+ * Supports ADR-004 dual resolution for the run ID.
  * Returns URLs only - does not fetch artifact content.
  */
 export async function getRunArtifactsHandler(
@@ -257,14 +276,15 @@ export async function getRunArtifactsHandler(
   try {
     const { id } = req.params as unknown as RunIdParams;
 
-    // First verify the run exists
-    const run = await getRunById(id);
-    if (!run) {
+    // Resolve via ADR-004 dual resolution
+    const resolved = await resolveRunById(id);
+    if (!resolved) {
       throw new NotFoundError(`Run with ID '${id}' not found`);
     }
 
     const startTime = Date.now();
-    const artifacts = await getArtifactsByRun(id);
+    // Artifacts are always keyed by run_id (the DB primary key)
+    const artifacts = await getArtifactsByRun(resolved.run.run_id);
     const queryTimeMs = Date.now() - startTime;
 
     const response: SuccessResponse<ArtifactReference[]> = {

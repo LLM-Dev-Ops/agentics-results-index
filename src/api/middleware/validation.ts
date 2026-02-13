@@ -96,9 +96,17 @@ export const summaryQuerySchema = z.object({
 
 /**
  * Schema for /runs/:id path parameter
+ * Accepts UUID (legacy run_id), exec-* (execution_id), or sim-* (simulation_id)
+ * per ADR-004 dual resolution.
  */
 export const runIdParamSchema = z.object({
-  id: uuidSchema,
+  id: z.string().min(1).max(256).refine(
+    (val) =>
+      val.startsWith('exec-') ||
+      val.startsWith('sim-') ||
+      z.string().uuid().safeParse(val).success,
+    { message: 'Must be a UUID, exec-<id>, or sim-<id>' }
+  ),
 });
 
 /**

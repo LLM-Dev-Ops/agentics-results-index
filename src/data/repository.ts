@@ -10,6 +10,9 @@ import {
   buildRunsListQuery,
   buildRunsCountQuery,
   buildRunByIdQuery,
+  buildRunByExecutionIdQuery,
+  buildRunBySimulationIdQuery,
+  buildRunBySimulationIdReverseLookupQuery,
   buildLastRunQuery,
   buildEnvironmentSummaryQuery,
   buildScenarioHistoryQuery,
@@ -180,6 +183,98 @@ export async function getRunById(runId: string): Promise<Run | null> {
   }
 
   return mapRowToRun(result.rows[0]!);
+}
+
+/**
+ * Look up a run by execution_id (stored in metadata JSONB).
+ * Per ADR-004: execution_id is the canonical primary index.
+ */
+export async function getRunByExecutionId(executionId: string): Promise<Run | null> {
+  const query = buildRunByExecutionIdQuery(executionId);
+  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToRun(result.rows[0]!);
+}
+
+/**
+ * Look up a run by simulation_id (stored in metadata JSONB or as run_id).
+ */
+export async function getRunBySimulationId(simulationId: string): Promise<Run | null> {
+  const query = buildRunBySimulationIdQuery(simulationId);
+  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToRun(result.rows[0]!);
+}
+
+/**
+ * Reverse lookup: find a run whose execution_id mapping references
+ * the given simulation_id.
+ */
+export async function getRunBySimulationIdReverse(simulationId: string): Promise<Run | null> {
+  const query = buildRunBySimulationIdReverseLookupQuery(simulationId);
+  const result = await executeReadOnlyQuery<RunRow>(query.sql, query.params);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToRun(result.rows[0]!);
+}
+
+export type LookupMode = 'execution' | 'simulation';
+
+export interface ResolvedRun {
+  run: Run;
+  lookupMode: LookupMode;
+  resolvedExecutionId: string;
+}
+
+/**
+ * Dual resolution per ADR-004:
+ *
+ *   exec-* → lookup by execution_id (canonical)
+ *   sim-*  → lookup by simulation_id, reverse-lookup fallback
+ *   UUID   → lookup by run_id (legacy)
+ */
+export async function resolveRunById(id: string): Promise<ResolvedRun | null> {
+  if (id.startsWith('exec-')) {
+    const run = await getRunByExecutionId(id);
+    if (!run) return null;
+    const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+    return { run, lookupMode: 'execution', resolvedExecutionId };
+  }
+
+  if (id.startsWith('sim-')) {
+    // Primary: direct simulation_id lookup
+    let run = await getRunBySimulationId(id);
+    if (run) {
+      const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+      return { run, lookupMode: 'simulation', resolvedExecutionId };
+    }
+
+    // Fallback: reverse lookup via execution_id mapping
+    run = await getRunBySimulationIdReverse(id);
+    if (run) {
+      const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+      return { run, lookupMode: 'simulation', resolvedExecutionId };
+    }
+
+    return null;
+  }
+
+  // Legacy UUID path
+  const run = await getRunById(id);
+  if (!run) return null;
+  const resolvedExecutionId = (run.metadata?.['execution_id'] as string) ?? run.run_id;
+  return { run, lookupMode: 'execution', resolvedExecutionId };
 }
 
 /**

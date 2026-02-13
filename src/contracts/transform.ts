@@ -95,8 +95,14 @@ export function transformToCanonicalResult(run: Run): {
     const proofData = meta['executionProof'] as Record<string, unknown>;
     const layersExecuted = meta['layers_executed'] as string[];
 
+    const canonicalExecutionId = meta['execution_id'] as string;
+    // simulation_id: explicit in metadata, or fall back to run_id
+    const canonicalSimulationId = typeof meta['simulation_id'] === 'string'
+      ? meta['simulation_id']
+      : `sim-${run.run_id}`;
+
     const execution_metadata: ExecutionMetadata = {
-      execution_id: meta['execution_id'] as string,
+      execution_id: canonicalExecutionId,
       proof_hash: meta['proof_hash'] as string,
       layers_executed: layersExecuted,
       schema_version: (meta['schema_version'] as string) ?? SCHEMA_VERSION,
@@ -121,6 +127,8 @@ export function transformToCanonicalResult(run: Run): {
       result: {
         run_id: run.run_id,
         scenario_id: run.scenario_id,
+        execution_id: canonicalExecutionId,
+        simulation_id: canonicalSimulationId,
         environment: run.environment,
         status: run.status,
         execution_metadata,
@@ -142,8 +150,14 @@ export function transformToCanonicalResult(run: Run): {
   const layerRecords = buildLegacyLayerRecords(run);
   const layersExecuted = layerRecords.map((lr) => lr.layer_name);
 
+  // Legacy: execution_id = run_id, simulation_id derived from run_id
+  const legacyExecutionId = run.run_id;
+  const legacySimulationId = typeof run.metadata?.['simulation_id'] === 'string'
+    ? run.metadata['simulation_id'] as string
+    : `sim-${run.run_id}`;
+
   const execution_metadata: ExecutionMetadata = {
-    execution_id: run.run_id, // Use run_id as execution_id for legacy
+    execution_id: legacyExecutionId,
     proof_hash: proofHash,
     layers_executed: layersExecuted,
     schema_version: SCHEMA_VERSION,
@@ -165,6 +179,8 @@ export function transformToCanonicalResult(run: Run): {
     result: {
       run_id: run.run_id,
       scenario_id: run.scenario_id,
+      execution_id: legacyExecutionId,
+      simulation_id: legacySimulationId,
       environment: run.environment,
       status: run.status,
       execution_metadata,

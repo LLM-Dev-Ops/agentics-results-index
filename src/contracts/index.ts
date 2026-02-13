@@ -28,8 +28,10 @@ export { SCHEMA_VERSION } from './simulation';
 export type {
   ValidationStatus,
   InspectDebugLog,
+  LookupMode,
+  ResultsIndexLookupLog,
 } from './observability';
-export { logInspectDebug } from './observability';
+export { logInspectDebug, logResultsIndexLookup } from './observability';
 
 export {
   validateAgainstSchema,

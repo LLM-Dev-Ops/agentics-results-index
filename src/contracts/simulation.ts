@@ -28,6 +28,10 @@ export interface SimulationResultSummary {
 export interface SimulationExecutionResult {
   run_id: string;
   scenario_id: string;
+  /** Canonical execution authority ID per ADR-004 */
+  execution_id: string;
+  /** Legacy simulation ID for backward compatibility */
+  simulation_id: string;
   environment: string;
   status: string;
   execution_metadata: ExecutionMetadata;

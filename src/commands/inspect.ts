@@ -11,6 +11,7 @@ import {
   getRunById,
   getLastRun,
   getRunsByScenario,
+  resolveRunById,
 } from '../data/repository';
 import {
   buildExecutiveSummary,
@@ -38,6 +39,7 @@ import {
   validateAgainstSchema,
   buildCLIError,
   logInspectDebug,
+  logResultsIndexLookup,
   SCHEMA_VERSION,
 } from '../contracts';
 
@@ -329,21 +331,35 @@ export async function inspectLatest(
 /**
  * Inspect a specific run by ID
  *
+ * Supports ADR-004 dual resolution:
+ *   exec-* → lookup by execution_id (canonical)
+ *   sim-*  → lookup by simulation_id, with reverse-lookup fallback
+ *   UUID   → lookup by run_id (legacy)
+ *
  * Returns the run details with synthesis based on its status.
  */
 export async function inspectRun(
   input: InspectRunInput
 ): Promise<InspectRunResult> {
   try {
-    const run = await getRunById(input.runId);
+    const resolved = await resolveRunById(input.runId);
 
-    if (!run) {
+    // Structured lookup log per ADR-004
+    logResultsIndexLookup({
+      input_id: input.runId,
+      resolved_execution_id: resolved?.resolvedExecutionId ?? null,
+      lookup_mode: input.runId.startsWith('sim-') ? 'simulation' : 'execution',
+    });
+
+    if (!resolved) {
       return {
         success: true,
         run: null,
         error: `Run '${input.runId}' not found`,
       };
     }
+
+    const { run } = resolved;
 
     // Transform to canonical contract shape
     const { result, validationError } = transformAndValidate(run);

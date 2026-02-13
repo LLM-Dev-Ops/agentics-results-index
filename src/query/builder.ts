@@ -221,6 +221,33 @@ export function buildRunByIdQuery(runId: string): { sql: string; params: unknown
 }
 
 /**
+ * Build query for looking up a run by execution_id in metadata JSONB.
+ * Per ADR-004: execution_id is the canonical primary index.
+ */
+export function buildRunByExecutionIdQuery(executionId: string): { sql: string; params: unknown[] } {
+  const sql = `SELECT ${RUN_COLUMNS.join(', ')} FROM ${VIEWS.COMPLETED_RUNS} WHERE metadata->>'execution_id' = $1 ORDER BY completed_at DESC LIMIT 1`;
+  return { sql, params: [executionId] };
+}
+
+/**
+ * Build query for looking up a run by simulation_id in metadata JSONB.
+ * Falls back to matching run_id if simulation_id is not explicitly stored.
+ */
+export function buildRunBySimulationIdQuery(simulationId: string): { sql: string; params: unknown[] } {
+  const sql = `SELECT ${RUN_COLUMNS.join(', ')} FROM ${VIEWS.COMPLETED_RUNS} WHERE metadata->>'simulation_id' = $1 OR run_id = $1 ORDER BY completed_at DESC LIMIT 1`;
+  return { sql, params: [simulationId] };
+}
+
+/**
+ * Build reverse-lookup query: given a simulation_id, find a run whose
+ * execution_id metadata maps back to it.
+ */
+export function buildRunBySimulationIdReverseLookupQuery(simulationId: string): { sql: string; params: unknown[] } {
+  const sql = `SELECT ${RUN_COLUMNS.join(', ')} FROM ${VIEWS.COMPLETED_RUNS} WHERE metadata->>'simulation_id' = $1 OR metadata->>'execution_id' = $1 ORDER BY completed_at DESC LIMIT 1`;
+  return { sql, params: [simulationId] };
+}
+
+/**
  * Build query for getting the most recent run
  */
 export function buildLastRunQuery(
