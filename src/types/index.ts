@@ -176,5 +176,7 @@ export interface HealthResponse {
   timestamp: string;
   checks: {
     database: 'ok' | 'error';
+    eventBus?: 'ok' | 'error';
   };
+  eventSubscriptions?: Record<string, string[]>;
 }

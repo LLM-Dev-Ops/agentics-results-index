@@ -1,11 +1,18 @@
 /**
  * agentics-results-index
  *
- * Contract-aligned query and ingestion service for Agentics runs.
+ * Event-driven query and ingestion service for Agentics runs.
  *
- * This service enforces strict contract compliance via agentics-contracts
- * schemas. All payloads are validated at runtime. Storage failures are
- * never silently swallowed.
+ * This service subscribes to lifecycle events (execution_completed)
+ * to index run metadata and artifact references. All payloads are
+ * validated at runtime against agentics-contracts schemas. Storage
+ * failures are never silently swallowed.
+ *
+ * Architecture:
+ *   POST /api/v1/runs -> validate -> publish(execution_completed)
+ *   EventBus -> store-run-metadata subscriber -> runs table
+ *   EventBus -> index-artifacts subscriber -> artifacts table
+ *   GET /api/v1/runs/* -> read-only query layer -> response
  *
  * @see /plans/SPARC_SPECIFICATION.md
  */
@@ -14,6 +21,8 @@ import { createServer, startServer } from './server';
 import { initPool, closePool } from './data/pool';
 import { initWritePool, closeWritePool } from './data/write-pool';
 import { loadConfig, enforceStorageConfig } from './config';
+import { initEventBus } from './events/event-bus';
+import { registerAllSubscribers } from './events/register';
 
 async function main(): Promise<void> {
   console.log('[startup] agentics-results-index starting...');
@@ -52,6 +61,18 @@ async function main(): Promise<void> {
     console.log('[startup] Write connection pool initialized');
   } catch (err) {
     console.error('[startup] Failed to initialize write pool:', (err as Error).message);
+    process.exit(1);
+  }
+
+  // Initialize EventBus and register lifecycle event subscribers.
+  // MUST happen after write pool init (subscribers depend on it).
+  try {
+    const bus = initEventBus();
+    registerAllSubscribers(bus);
+    console.log('[startup] EventBus initialized, subscribers registered');
+    console.log('[startup] Subscriptions:', JSON.stringify(bus.listSubscriptions()));
+  } catch (err) {
+    console.error('[startup] Failed to initialize EventBus:', (err as Error).message);
     process.exit(1);
   }
 

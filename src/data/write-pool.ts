@@ -127,6 +127,71 @@ export async function storeResultPacket(packet: ResultPacket): Promise<void> {
 }
 
 /**
+ * Index artifact references from a result packet.
+ *
+ * Extracts artifact metadata from the execution proof layer records
+ * and stores references in the artifacts table. If no artifacts are
+ * present in the packet, this is a no-op.
+ *
+ * Called by the execution_completed subscriber after run metadata
+ * is stored.
+ */
+export async function indexArtifactsFromPacket(packet: ResultPacket): Promise<void> {
+  if (!writePool) {
+    throw new Error('Write pool not initialized — cannot index artifacts');
+  }
+
+  // Extract artifact references from execution proof layer records.
+  // Artifacts may be embedded in layer records or in execution_context.
+  const artifacts: Array<{
+    artifact_type: string;
+    artifact_name: string;
+    storage_url: string;
+    size_bytes: number;
+  }> = [];
+
+  // Check for artifacts in result_summary (common pattern)
+  const summary = packet.result_summary as Record<string, unknown>;
+  if (Array.isArray(summary.artifacts)) {
+    for (const artifact of summary.artifacts) {
+      if (artifact && typeof artifact === 'object' && 'artifact_type' in artifact) {
+        artifacts.push({
+          artifact_type: String(artifact.artifact_type ?? 'unknown'),
+          artifact_name: String(artifact.artifact_name ?? 'unnamed'),
+          storage_url: String(artifact.storage_url ?? ''),
+          size_bytes: Number(artifact.size_bytes ?? 0),
+        });
+      }
+    }
+  }
+
+  if (artifacts.length === 0) {
+    return;
+  }
+
+  const client = await writePool.connect();
+  try {
+    for (const artifact of artifacts) {
+      const sql = `
+        INSERT INTO artifacts (
+          artifact_id, run_id, artifact_type, artifact_name, storage_url, size_bytes
+        ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+        ON CONFLICT DO NOTHING
+      `;
+      await client.query(sql, [
+        packet.run_id,
+        artifact.artifact_type,
+        artifact.artifact_name,
+        artifact.storage_url,
+        artifact.size_bytes,
+      ]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Gracefully close the write pool
  */
 export async function closeWritePool(): Promise<void> {
