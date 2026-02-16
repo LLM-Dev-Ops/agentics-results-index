@@ -12,6 +12,7 @@ import { getHealth } from './handlers/health';
 import {
   listRunsHandler,
   getLastRunHandler,
+  getLatestRunHandler,
   getRunByIdHandler,
   getRunArtifactsHandler,
 } from './handlers/runs';
@@ -100,6 +101,14 @@ export function createApiRouter(): Router {
     getScenarioRunsHandler
   );
   router.all('/scenarios/:id/runs', methodNotAllowedHandler);
+
+  // =========================================================================
+  // Results Endpoints
+  // =========================================================================
+
+  // GET /results/latest - most recently indexed run (no filters required)
+  router.get('/results/latest', getLatestRunHandler);
+  router.all('/results/latest', methodNotAllowedHandler);
 
   // =========================================================================
   // Summary Endpoints

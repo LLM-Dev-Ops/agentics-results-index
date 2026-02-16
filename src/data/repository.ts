@@ -14,6 +14,7 @@ import {
   buildRunBySimulationIdQuery,
   buildRunBySimulationIdReverseLookupQuery,
   buildLastRunQuery,
+  buildLatestRunQuery,
   buildEnvironmentSummaryQuery,
   buildScenarioHistoryQuery,
   buildScenariosListQuery,
@@ -323,6 +324,14 @@ export async function getLastRun(
     });
     throw new QueryFailureError('QueryFailure');
   }
+}
+
+/**
+ * Get the most recent run across all environments.
+ * HARDENED: DB failures return null — never throws.
+ */
+export async function getLatestRun(): Promise<Run | null> {
+  return safeSingleRowQuery('getLatestRun', buildLatestRunQuery());
 }
 
 /**

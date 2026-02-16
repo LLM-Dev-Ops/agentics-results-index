@@ -13,6 +13,7 @@ import {
   listRuns,
   getRunById,
   getLastRun,
+  getLatestRun,
   getArtifactsByRun,
   resolveRunById,
   QueryFailureError,
@@ -250,6 +251,46 @@ export async function getLastRunHandler(
         timestamp: new Date().toISOString(),
       },
     });
+  }
+}
+
+/**
+ * GET /api/v1/results/latest
+ *
+ * Get the most recently indexed run across all environments.
+ * If no runs exist, returns { found: false, message: "No runs indexed yet" } with 200.
+ * HARDENED: Never returns 500. Never throws. Never calls next(err).
+ */
+export async function getLatestRunHandler(
+  req: Request,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    const run = await getLatestRun();
+
+    if (!run) {
+      res.status(200).json({ found: false, message: 'No runs indexed yet' });
+      return;
+    }
+
+    const result = safeTransformRun(run, req.requestId);
+
+    if (!result) {
+      res.status(200).json({ found: false, message: 'No runs indexed yet' });
+      return;
+    }
+
+    res.status(200).json({
+      data: result,
+      metadata: { requestId: req.requestId },
+    });
+  } catch (err) {
+    console.error('[RESULTS_INDEX_LATEST_ERROR]', {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      requestId: req.requestId,
+    });
+    res.status(200).json({ found: false, message: 'No runs indexed yet' });
   }
 }
 

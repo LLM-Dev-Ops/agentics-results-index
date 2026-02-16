@@ -85,6 +85,7 @@ export function createServer(): Application {
         scenarios: 'GET /api/v1/scenarios',
         scenarioById: 'GET /api/v1/scenarios/:id',
         scenarioRuns: 'GET /api/v1/scenarios/:id/runs',
+        latestResult: 'GET /api/v1/results/latest',
         summary: 'GET /api/v1/summary',
       },
     });

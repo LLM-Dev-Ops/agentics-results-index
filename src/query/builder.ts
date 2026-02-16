@@ -271,6 +271,14 @@ export function buildLastRunQuery(
 }
 
 /**
+ * Build query for getting the most recent run across all environments
+ */
+export function buildLatestRunQuery(): { sql: string; params: unknown[] } {
+  const sql = `SELECT ${RUN_COLUMNS.join(', ')} FROM ${VIEWS.COMPLETED_RUNS} ORDER BY completed_at DESC LIMIT 1`;
+  return { sql, params: [] };
+}
+
+/**
  * Build query for environment summary statistics
  */
 export function buildEnvironmentSummaryQuery(
