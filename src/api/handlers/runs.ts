@@ -161,12 +161,13 @@ export async function listRunsHandler(
 
     // Guard: empty result set
     if (!runs || runs.length === 0) {
-      const response: SuccessResponse<SimulationExecutionResult[]> = {
-        data: [],
-        pagination,
-        metadata: { queryTimeMs, requestId: req.requestId },
-      };
-      res.status(200).json(response);
+      res.status(200).json({
+        result_packet: {
+          results: [],
+          pagination,
+          metadata: { queryTimeMs, requestId: req.requestId },
+        },
+      });
       return;
     }
 
@@ -175,16 +176,16 @@ export async function listRunsHandler(
       .map((run) => safeTransformRun(run, req.requestId))
       .filter((r): r is SimulationExecutionResult => r !== null);
 
-    const response: SuccessResponse<SimulationExecutionResult[]> = {
-      data: results,
-      pagination,
-      metadata: {
-        queryTimeMs,
-        requestId: req.requestId,
+    res.status(200).json({
+      result_packet: {
+        results,
+        pagination,
+        metadata: {
+          queryTimeMs,
+          requestId: req.requestId,
+        },
       },
-    };
-
-    res.status(200).json(response);
+    });
   } catch (err) {
     if (err instanceof QueryFailureError) {
       console.error('[RESULTS_INDEX_QUERY_FAILURE]', {
@@ -223,20 +224,20 @@ export async function getLastRunHandler(
     const run = await getLastRun(query.environment, query.scenario);
 
     if (!run) {
-      res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+      res.status(200).json({ result_packet: null, found: false, message: 'No runs indexed yet' });
       return;
     }
 
     const result = safeTransformRun(run, req.requestId);
 
     if (!result) {
-      res.status(200).json({ data: null, metadata: { requestId: req.requestId } });
+      res.status(200).json({ result_packet: null, found: false, message: 'No runs indexed yet' });
       return;
     }
 
     res.status(200).json({
-      data: result,
-      metadata: { requestId: req.requestId },
+      result_packet: result,
+      found: true,
     });
   } catch (err) {
     console.error('[RESULTS_INDEX_LAST_ERROR]', {
