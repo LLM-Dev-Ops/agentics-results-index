@@ -152,6 +152,7 @@ export function transformToCanonicalResult(run: Run): {
         simulation_id: canonicalSimulationId,
         environment: run.environment,
         status: run.status,
+        created_at: run.created_at,
         execution_metadata,
         executionProof,
         result_summary: {
@@ -207,6 +208,7 @@ export function transformToCanonicalResult(run: Run): {
       simulation_id: legacySimulationId,
       environment: run.environment,
       status: run.status,
+      created_at: run.created_at,
       execution_metadata,
       executionProof,
       result_summary: {

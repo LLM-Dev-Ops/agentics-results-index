@@ -82,6 +82,7 @@ const SimulationExecutionResultSchema = z.object({
   simulation_id: z.string().min(1),
   environment: z.string().min(1),
   status: z.string().min(1),
+  created_at: z.string().min(1),
   execution_metadata: ExecutionMetadataSchema,
   executionProof: ExecutionProofSchema,
   result_summary: SimulationResultSummarySchema,

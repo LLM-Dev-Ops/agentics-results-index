@@ -30,6 +30,7 @@ export interface Run {
   scenario_id: string;
   environment: Environment;
   status: RunStatus;
+  created_at: string;
   started_at: string;
   completed_at: string;
   duration_ms: number;

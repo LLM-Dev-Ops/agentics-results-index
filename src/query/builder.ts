@@ -29,6 +29,7 @@ const RUN_COLUMNS = [
   'scenario_id',
   'environment',
   'status',
+  'created_at',
   'started_at',
   'completed_at',
   'duration_ms',

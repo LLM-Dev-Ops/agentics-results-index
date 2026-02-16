@@ -75,6 +75,7 @@ export interface SimulationExecutionResult {
   simulation_id: string;
   environment: string;
   status: string;
+  created_at: string;
   execution_metadata: ExecutionMetadata;
   executionProof: ExecutionProof;
   result_summary: SimulationResultSummary;

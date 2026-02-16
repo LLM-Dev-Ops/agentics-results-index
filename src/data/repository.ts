@@ -39,6 +39,7 @@ interface RunRow {
   scenario_id: string;
   environment: string;
   status: string;
+  created_at: Date;
   started_at: Date;
   completed_at: Date;
   duration_ms: number;
@@ -88,6 +89,7 @@ function mapRowToRun(row: RunRow): Run {
     scenario_id: row.scenario_id,
     environment: row.environment as Environment,
     status: row.status as Run['status'],
+    created_at: row.created_at.toISOString(),
     started_at: row.started_at.toISOString(),
     completed_at: row.completed_at.toISOString(),
     duration_ms: row.duration_ms,

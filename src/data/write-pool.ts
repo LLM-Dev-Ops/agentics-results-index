@@ -82,13 +82,14 @@ export async function storeResultPacket(packet: ResultPacket): Promise<void> {
         scenario_id,
         environment,
         status,
+        created_at,
         started_at,
         completed_at,
         duration_ms,
         result_summary,
         correlation_id,
         metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `;
 
     // Preserve full contract structure in metadata JSONB.
@@ -107,11 +108,17 @@ export async function storeResultPacket(packet: ResultPacket): Promise<void> {
       timestamps: packet.timestamps ?? null,
     };
 
+    // Derive created_at: prefer timestamps.started_at, fall back to execution_metadata.started_at, then NOW()
+    const createdAt = packet.timestamps?.started_at
+      ?? packet.execution_metadata.started_at
+      ?? new Date().toISOString();
+
     const params = [
       packet.run_id,
       packet.scenario_id,
       packet.environment,
       packet.status,
+      createdAt,
       packet.execution_metadata.started_at,
       packet.execution_metadata.completed_at,
       packet.execution_metadata.duration_ms,
